@@ -1,0 +1,319 @@
+---
+title: "Analysis doc1"
+author: "David Fjendbo"
+date: "5/13/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("pacman"); p_load(ggplot2, tidyverse, dplyr, janitor, lme4, devtools, Rcpp, ggpubr)
+```
+
+Reading data and making specific dataframes
+```{r}
+df <- read_csv("dataframe2.csv")
+glimpse(df)
+
+donation_df <- data.frame(select(df, "DN03_01", "DN04_01", "DN01", "DN02"))
+
+demograph_df <- data.frame(select(df, "DM01", "DM02_01"))
+
+affect_df <- data.frame(select(df, "AF01", "AF03"))
+
+memory_df <- data.frame(select(df, "MT02_01", "MT04_01", "MI01_01", "MI02_01"))
+
+question_df <- data.frame(select(df, "QE02_01", "QE02_02","QE03_01","QE03_02","QE06_01","QE08_01","QE08_02","QE08_03","QE08_04", "QE09","MI01_01","MI02_01","RA01_CP","RA01","RN01_CP","RN01x01","RN01x02", "RN01x03","RE01_CP","RE01","TIME_SUM"))
+                    
+```
+
+Cleaning data
+```{r}
+# removing time outliers
+
+## making a column with time means for each participant
+df <- df %>% 
+  rowwise() %>% 
+  mutate(timeMean = sum(c_across(TIME001:TIME015), na.rm = T))
+
+## calculating z_scores and removing outliers
+df$z_scores <- (df$timeMean-mean(df$timeMean))/sd(df$timeMean)
+df <- df %>% 
+  filter(2 > z_scores) %>% 
+  filter(DM02_01 < 90)
+
+
+```
+
+
+
+Looking at demographics
+```{r}
+# looking at gender
+ggplot(demograph_df, aes(DM01)) +
+  geom_histogram(stat = "count")
+table(df$DM01)
+
+# looking at age
+ggplot(demograph_df, aes(DM02_01)) +
+  geom_histogram(stat = "count")
+mean(df$DM02_01)
+```
+
+How are people feeling
+```{r}
+# mental affect
+ggplot(affect_df, aes(AF01)) +
+  geom_histogram(stat = "count")
+
+# emotional affect
+ggplot(affect_df, aes(AF03)) +
+  geom_histogram(stat = "count")
+```
+
+How are people donating
+```{r}
+# did people donate or not
+ggplot(donation_df, aes(DN01)) +
+  geom_histogram(stat = "count")
+table(df$DN01)
+
+# plotting peoples willingness
+ggplot(donation_df, aes(DN02)) +
+  geom_histogram(stat = "count")
+table(df$DN02)
+```
+
+looking at the memories
+```{r}
+# how many got a memory task of each type, high = 1, low = 2, control = 3
+count(question_df, RA01 == 1, RA01 == 2, RA01 == 3)
+
+
+# do you remember
+matching_mem <- memory_df %>% 
+  janitor::remove_empty() %>% 
+  mutate_all(funs(gsub("[[:punct:]]", " ", .))) %>% 
+  filter(MI01_01 == "0 6 9 7 3 4 2 5 1")
+
+# how many remembered correctly
+count(matching_mem)
+
+
+```
+
+Visualizing interesting relations in the data
+```{r}
+# take a look at age and donations'
+ggplot(df, aes(DM02_01, DN01)) +
+  geom_jitter()
+
+# another one at gender and donations
+ggplot(df, aes(DM01, DN01)) +
+  geom_jitter()
+
+```
+
+Creating DAGs for causal relations
+```{r}
+# DAG for donations
+#dagDon <- dagitty::dagitty("dag{C -> D}")
+#ggdag::ggdag(dagDon)
+
+# DAG for effectiveness info
+```
+
+Filtering data for making models
+```{r}
+# calculating means and counts for each likert scale response in condition groups
+
+# making df1, high load
+df1_EF <- filter(df, RA01 == 1) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_01, QE03_02, QE08_01, QE08_03) %>% 
+  na.omit()
+df1_EF[df1_EF == "-1"] <- NA
+
+df1_INEF <- filter(df, RA01 == 1) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_02, QE03_01, QE08_02, QE08_04)%>% 
+  na.omit()
+df1_INEF[df1_INEF == "-1"] <- NA
+
+count1_EF <- table(unlist(df1_EF))
+count1_INEF <- table(unlist(df1_INEF))
+perc1 <- 100*count1/sum(count1)
+
+
+# making df2, low load
+df2_EF <- filter(df, RA01 == 2) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_01, QE03_02, QE08_01, QE08_03)%>% 
+  na.omit()
+df2_EF[df2_EF == "-1"] <- NA
+
+df2_INEF <- filter(df, RA01 == 2) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_02, QE03_01, QE08_02, QE08_04)%>% 
+  na.omit()
+df2_INEF[df2_INEF == "-1"] <- NA
+
+count2_EF <- table(unlist(df2_EF))
+count2_INEF <- table(unlist(df2_INEF))
+perc2 <- 100*count2/sum(count2)
+
+
+# making df3, no load
+df3_EF <- filter(df, RA01 == 3) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_01, QE03_02, QE08_01, QE08_03)%>% 
+  na.omit()
+df3_EF[df3_EF == "-1"] <- NA
+
+df3_INEF <- filter(df, RA01 == 3) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_02, QE03_01, QE08_02, QE08_04)%>% 
+  na.omit()
+df3_INEF[df3_INEF == "-1"] <- NA
+
+count3_EF <- table(unlist(df3_EF))
+count3_INEF <- table(unlist(df3_INEF))
+perc3 <- 100*count3/sum(count3)
+
+
+# viewing dfs
+count1_EF
+count1_INEF
+count2_EF
+count2_INEF
+count3_EF 
+count3_INEF
+
+# veiwing data
+plot(count1)
+```
+
+Filtering data for making effectiveness models
+```{r}
+# making df12, effectivness 
+df12_EF <- filter(df, RE01 == 1) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_01, QE03_02, QE08_01, QE08_03)%>% 
+  na.omit()
+df12_EF[df12_EF == "-1"] <- NA
+
+df12_INEF <- filter(df, RE01 == 1) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_02, QE03_01, QE08_02, QE08_04)%>% 
+  na.omit()
+df12_INEF[df12_INEF == "-1"] <- NA
+
+count12_EF <- table(unlist(df12_EF))
+count12_INEF <- table(unlist(df12_INEF))
+perc12 <- 100*count12/sum(count12)
+
+
+# making df22, no effectiveness
+df22_EF <- filter(df, RE01 == 2) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_01, QE03_02, QE08_01, QE08_03)%>% 
+  na.omit()
+df22_EF[df22_EF == "-1"] <- NA
+
+df22_INEF <- filter(df, RE01 == 2) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_02, QE03_01, QE08_02, QE08_04)%>% 
+  na.omit()
+df22_INEF[df22_INEF == "-1"] <- NA
+
+count22_EF <- table(unlist(df2_EF))
+count22_INEF <- table(unlist(df2_INEF))
+perc2 <- 100*count2/sum(count2)
+
+
+
+```
+
+
+Making plots
+```{r}
+# cleaning data for plot
+df_plot_EF<- select(df, QE02_01, QE03_02, QE08_01, QE08_03)
+  df_plot_EF <- as.data.frame(table(unlist(df_plot_EF)))
+  
+
+df_plot_INEF<- select(df, QE02_02, QE03_01, QE08_02, QE08_04)
+  df_plot_INEF <- as.data.frame(table(unlist(df_plot_INEF)))
+
+# making 6 plots showing answer rates
+p1 <- ggplot(df_plot_EF, aes(x = Var1, y = Freq)) +
+  geom_col(fill = "red", color = "black") +
+  labs(title = "Effective charities", x = "Likert scale response")
+
+p2 <- ggplot(df_plot_INEF, aes(x = Var1, y = Freq)) +
+  geom_col(fill = "red", color = "black") +
+  labs(title = "Well-known charities", x = "Likert scale response")
+
+ggarrange(p1, p2)
+```
+
+
+
+Making models/tests
+```{r}
+###### Cognitive load and donation decisions  ######
+
+# chi-squared tests
+
+chisq.test(count1_EF, count2_EF) # high/low
+chisq.test(count1_EF, count3_EF) # high/no
+chisq.test(count2_EF, count3_EF) # low/no
+
+chisq.test(count1_INEF, count2_INEF) # high/low
+chisq.test(count1_INEF, count3_INEF) # high/no
+chisq.test(count2_INEF, count3_INEF) # low/no
+
+chisq.test(count1_EF, count2_EF, simulate.p.value = TRUE) # high/low
+chisq.test(count1_EF, count3_EF, simulate.p.value = TRUE) # high/no
+chisq.test(count2_EF, count3_EF, simulate.p.value = TRUE) # low/no
+
+chisq.test(count1_INEF, count2_INEF, simulate.p.value = TRUE) # high/low
+chisq.test(count1_INEF, count3_INEF, simulate.p.value = TRUE) # high/no
+chisq.test(count2_INEF, count3_INEF, simulate.p.value = TRUE) # low/no
+
+# correlation tests
+
+cor.test(count1_EF[0:6], count2_EF[0:6], method = "pearson") # including neutral
+cor.test(count1_EF[0:6], count3_EF[0:6], method = "pearson") # including neutral
+cor.test(count2_EF[0:6], count3_EF[0:6], method = "pearson") # including neutral
+
+cor.test(count1_INEF[0:6], count2_INEF[0:6], method = "pearson") # including neutral
+cor.test(count1_INEF[0:6], count3_INEF[0:6], method = "pearson") # including neutral
+cor.test(count2_INEF[0:6], count3_INEF[0:6], method = "pearson") # including neutral
+
+###### Effectiveness information and donation decisions  ######
+chisq.test(count12_EF, count22_EF) # eff/no eff
+chisq.test(count12_INEF, count22_INEF) # eff/no eff
+
+chisq.test(count12_EF, count22_EF, simulate.p.value = TRUE) # eff/no eff
+chisq.test(count12_INEF, count22_INEF, simulate.p.value = TRUE) # eff/no eff
+
+cor.test(count12_EF[0:6], count22_EF[0:6], method = "pearson") # including neutral
+cor.test(count12_INEF[0:6], count22_INEF[0:6], method = "pearson") # including neutral
+
+
+# counting number of participants in each condition
+table(df$RA01)
+table(df$RE01)
+
+dfs <- filter(df, RA01 == 2) %>% 
+  select(QE02_01:QE08_04)%>% 
+  select(QE02_01, QE03_02, QE08_01, QE08_03)
+table(unlist(dfs))
+
+```
+
+```{r}
+RStudio.Version()
+```
+
